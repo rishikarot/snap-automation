@@ -1,1 +1,13 @@
-
+import test from 'node:test';import assert from 'node:assert/strict';
+import {interpretPrompt,matchEvent,validateRule,blankRule,isScheduleDue,describeDo,expandTokens} from '../engine.mjs';
+const parse=s=>interpretPrompt(s,'project','SNAP Mobile');
+test('event based blocked task parses with project and push',()=>{const r=parse('When task becomes blocked in SNAP Mobile notify project owner by push').rule;assert.equal(r.trigger.event,'task.status');assert.deepEqual(r.trigger.statuses,['Blocked']);assert.deepEqual(r.actions[0].channels,['fcm']);assert.deepEqual(validateRule(r),[])});
+test('daily scheduled email report',()=>{const r=parse('Every day at 9 AM email project health to owner').rule;assert.equal(r.trigger.type,'schedule');assert.equal(r.trigger.at,'09:00');assert.equal(r.actions[0].type,'report');assert.deepEqual(r.actions[0].channels,['email'])});
+test('delayed recheck',()=>{const r=parse('When task is blocked wait 2 hours if still blocked send push').rule;assert.equal(r.delivery.mode,'delay');assert.equal(r.delivery.delayMinutes,120);assert.equal(r.delivery.recheck,true)});
+test('digest at specified time',()=>{const r=parse('When any task status changes combine updates into digest at 6 PM and email owner').rule;assert.equal(r.delivery.mode,'digest');assert.equal(r.delivery.digestAt,'18:00');assert.deepEqual(r.trigger.statuses,['*'])});
+test('QA handoff follow-on task',()=>{const r=parse('When a task is QA Approved, create a follow-up task then notify the task assignee by push').rule;assert.equal(r.actions.length,2);assert.equal(r.actions[0].type,'create_task')});
+test('ambiguous time explicitly clarified',()=>{const x=parse('Every day at 6 send project health');assert.equal(x.clarification.field,'trigger.at');assert.equal(x.clarification.options.length,2)});
+test('external recipient is rejected',()=>{const x=parse('When a task is blocked send WhatsApp to customer');assert.ok(x.error)});
+test('scoped status matching',()=>{const r=parse('When task becomes blocked in SNAP Mobile notify by push').rule;const e={id:'e1',type:'task.status',project:'SNAP Mobile',toStatus:'Blocked',task:{priority:'Normal'}};assert.equal(matchEvent(r,e).ok,true);assert.equal(matchEvent(r,{...e,toStatus:'Completed'}).ok,false);assert.equal(matchEvent(r,{...e,project:'Garage360'}).ok,false)});
+test('schedule due and dedupes',()=>{const r=blankRule();r.enabled=true;r.trigger.type='schedule';r.trigger.repeat='daily';r.trigger.at='09:00';const dt=new Date(2026,9,18,9,15);const key=r.id+'@2026-10-18';assert.equal(isScheduleDue(r,dt,[]),true);assert.equal(isScheduleDue(r,dt,[key]),false)});
+test('messages are token interpolated without eval',()=>{assert.equal(expandTokens('{task.title} in {project.name}',{task:{title:'Test'},project:'SNAP Mobile'}),'Test in SNAP Mobile')});
